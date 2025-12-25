@@ -1,0 +1,45 @@
+{
+  "index_patterns": ["web-logs-*"],
+  "template": {
+    "settings": {
+      "number_of_shards": 3,
+      "number_of_replicas": 1,
+      "refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "timestamp": { "type": "date" },
+        "method": { "type": "keyword" },
+        "path": { "type": "keyword" },
+        "url": { "type": "text" },
+        "client_ip": { "type": "ip" },
+        "user_agent": { "type": "text" },
+        "referer": { "type": "text" },
+        "status_code": { "type": "integer" },
+        "status_category": { "type": "keyword" },
+        "response_time_ms": { "type": "float" },
+        "response_category": { "type": "keyword" },
+        "request_id": { "type": "keyword" },
+        "hostname": { "type": "keyword" },
+        "query_params": { "type": "object", "enabled": false },
+        "geo": {
+          "properties": {
+            "city_name": { "type": "keyword" },
+            "country_name": { "type": "keyword" },
+            "location": { "type": "geo_point" }
+          }
+        },
+        "ua": {
+          "properties": {
+            "name": { "type": "keyword" },
+            "os": { "type": "keyword" },
+            "os_name": { "type": "keyword" },
+            "device": { "type": "keyword" }
+          }
+        },
+        "tags": { "type": "keyword" }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+.venv
+
+# Ignore all files in the docs directory
+docs/*
+
+# Ignore all files in the lecture directory
+lecture/*
+
+# Ignore all files in the demo directory
+legacy-docs/*
+seminar/*
+technical-docs/*

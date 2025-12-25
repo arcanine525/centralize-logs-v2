@@ -1,0 +1,219 @@
+version: '3.8'
+
+networks:
+  log-network:
+    driver: bridge
+
+volumes:
+  zookeeper-data:
+  kafka-data:
+  elasticsearch-data:
+
+services:
+  # ==========================================
+  # Zookeeper - Coordination Service
+  # ==========================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    hostname: zookeeper
+    container_name: zookeeper
+    networks:
+      - log-network
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,stat,srvr"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/commands/ruok || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ==========================================
+  # Kafka Broker - Message Queue
+  # ==========================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    networks:
+      - log-network
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx512M -Xms512M"
+      # Single broker settings for internal topics
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  # ==========================================
+  # Elasticsearch - Search & Storage
+  # ==========================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    networks:
+      - log-network
+    ports:
+      - "9200:9200"
+    environment:
+      - cluster.name=log-analysis-cluster
+      - node.name=es-node-1
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1536m -Xmx1536m"
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ==========================================
+  # Logstash - Data Pipeline
+  # ==========================================
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: logstash
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - log-network
+    ports:
+      - "9600:9600"
+    environment:
+      - "LS_JAVA_OPTS=-Xmx512m -Xms512m"
+    volumes:
+      - ./configs/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf:ro
+      - ./configs/logstash/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9600/_node/stats || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ==========================================
+  # Kibana - Visualization
+  # ==========================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - log-network
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=kibana
+      - MONITORING_ENABLED=false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ==========================================
+  # Log Producer - Python Web Server
+  # ==========================================
+  log-producer:
+    build:
+      context: ./log-producer
+      dockerfile: Dockerfile
+    container_name: log-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - log-network
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=web-logs
+      - APP_NAME=log-producer
+      - APP_VERSION=1.0.0
+    restart: unless-stopped
+
+  # ==========================================
+  # DDoS Detection API - ML-based Attack Detection
+  # Supports both HTTP (Option 1) and Kafka Consumer (Option 2) modes
+  # ==========================================
+  ddos-api:
+    build:
+      context: ../BKMS_BigData2025/demo/simple
+      dockerfile: Dockerfile
+    container_name: ddos-api
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - log-network
+    ports:
+      - "28000:8000"
+    environment:
+      # Elasticsearch Config
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - ES_INDEX=ddos-logs
+      # Model Config
+      - MODEL_PATH=/app/models/apache_ddos_model.pts
+      - SCALER_PATH=/app/models/scaler.joblib
+      - THRESHOLD=0.5
+      - TIME_WINDOW=60
+      - INPUT_DIM=16
+      # Kafka Consumer Config (Option 2)
+      - KAFKA_ENABLED=true
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=web-logs
+      - KAFKA_GROUP_ID=ddos-detector-group
+      - KAFKA_BATCH_SIZE=100
+    volumes:
+      - ../BKMS_BigData2025/demo/simple/models:/app/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped

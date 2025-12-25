@@ -1,0 +1,62 @@
+services:
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  #   container_name: es
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+  #   ports:
+  #     - "9200:9200"
+  #   volumes:
+  #     - es_data:/usr/share/elasticsearch/data
+  #   healthcheck:
+  #     test: curl -s http://localhost:9200 >/dev/null || exit 1
+  #     interval: 10s
+  #     retries: 10
+
+  api:
+    build: .
+    container_name: ddos-api
+    # depends_on:
+    #   elasticsearch:
+    #     condition: service_healthy
+    ports:
+      - "28000:8000"
+    environment:
+      # - ES_HOST=elasticsearch
+      # - ES_PORT=9200
+      # - ES_INDEX=logs
+      # - MODEL_PATH=/app/models/apache_ddos_model.pts
+      # - SCALER_PATH=/app/models/scaler.joblib
+      # - THRESHOLD=0.5
+      # - TIME_WINDOW=60
+      # - INPUT_DIM=16
+
+      - ES_HOST=34.133.12.184
+      - ES_PORT=9200
+      - ES_INDEX=logs
+      - MODEL_PATH=/app/models/apache_ddos_model.pts
+      - SCALER_PATH=/app/models/scaler.joblib
+      - THRESHOLD=0.5
+      - TIME_WINDOW=60
+      - INPUT_DIM=16
+    volumes:
+      - ./models:/app/models:ro
+
+  # Optional: Kibana UI (run with --profile ui)
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.11.0
+  #   container_name: kibana
+  #   depends_on:
+  #     - elasticsearch
+  #   ports:
+  #     - "5601:5601"
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #   profiles:
+  #     - ui
+
+volumes:
+  es_data:
+
